@@ -1,3 +1,4 @@
 *.png
 *.gif
 hello*
+__pycache__/
