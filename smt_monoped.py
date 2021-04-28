@@ -421,7 +421,7 @@ class MonopedSMTSolver():
             # No solution.
             return None, solver_time
 
-    def plot_solution(self, soln, save=False):
+    def plot_solution(self, soln, filename="smt_monoped.gif", save=False):
         """
         Make a matplotlib animation of the given solution.
 
@@ -517,7 +517,7 @@ class MonopedSMTSolver():
         ani = animation.FuncAnimation(fig, run, data_gen, init_func=init, interval=4000*self.dt)
 
         if save:
-            ani.save("smt_monoped.gif")
+            ani.save(filename)
 
         plt.show()
 
