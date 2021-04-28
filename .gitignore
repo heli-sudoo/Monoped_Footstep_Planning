@@ -1,5 +1,5 @@
 *.png
 *.gif
 hello*
-cartpole*
+carpole*
 __pycache__/
