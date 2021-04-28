@@ -6,63 +6,90 @@ import crocoddyl
 
 
 class DifferentialActionModelMonoped(crocoddyl.DifferentialActionModelAbstract):
-    def __init__(self, m=1, dt=0.1, I=1):
+    def __init__(self, p, m=1, dt=0.1, I=1):
         """ Action model for the Monoped (without legs).
-        The transition model of an unicycle system is described as           
+        The transition model of an unicycle system is described as    
+        params @ mode   : 'f' -> flight mode 's' -> stance mode  
+        params @ p      : contact position 
         """
         """
-        Joint q = [x, y, theta]
-        State x = [[q], [qd]]
-        Constrol u = [w; p] where w = [fx; fy] is ground reaction force
-        p = [px; py] is foot loction
-        xd = [qd, w-[0;g]], cross(p-[x;y], u)/I]
+        Joint q = np.array([xs, ys, the]) 
+              xs    CoM position in x
+              ys    CoM position in y
+              the   Body orientaion
+        Joint dev qd = np.array([xd,yd,thed])
+        State x = np.hstack((q, qd))
+        Control u = np.array([fx, fy]) is ground reaction force
+        qdd = np.array([w-[0;g], cross(p-[x;y], u)/I])
         """        
-        crocoddyl.DifferentialActionModelAbstract.__init__(self, crocoddyl.StateVector(6), 4, 10) #nu = 4, $nr = 10
+        if p[1]>0: # flight phase
+            nu = 0
+            nr = 6      
+            self.mode = 'f'  
+        elif p[1]==0: # stance phase
+            nu = 2
+            nr = 8
+            self.mode = 's'
+        else:
+            print('error: contact pos in y direction cannot be less than zero')
+            return
+
+        crocoddyl.DifferentialActionModelAbstract.__init__(self, crocoddyl.StateVector(6), nu, nr) #nu = 2 or 0, $nr = 8 or 6
 
         self.m = m
         self.dt = dt
         self.g = 9.81
         self.I = I
-        self.costWeights = list(np.ones(self.nr))
+        self.costWeights = [1,10,1,.01,.2,.1]
+        if self.mode == 's':
+            self.costWeights += [.1, .1]
         self.unone = np.zeros(self.nu)      
-        self.nx = 6       
-        
+        self.nx = 6
+        self.p = np.asarray(p)
+        self.xd = np.zeros(self.nx)
+        self.ud = np.zeros(nu)
+    def set_ref(self, xd):
+        self.xd = xd  
+        if self.mode=='s':
+            self.ud = np.array([0, self.g])        
 
     def calc(self, data, x, u=None):
         if u is None:
             u = self.unone  
         assert(self.nx == len(x))
         # Get control and foothold location              
-        w = u[0:2] # GRF
-        p = u[2:4] # Foothold location
         # Define dynamics equation (data.xout constains simply second-order EOM rather than state-space dyanmics)
-        qdd = np.zeros(3)
-        qdd[:2] = w + np.array([0, -self.g])
-        qdd[2] = np.cross(p-x[0:2], w) /self.I
+        qdd = np.zeros(3)  
+        qdd[:2] = np.array([0, -self.g])  
+        if self.mode == 's':
+            qdd[:2] += u 
+            qdd[-1] = np.cross(self.p-x[0:2], u) /self.I
+        
         data.xout = qdd
         # Define running cost
-        z = np.concatenate((x, u))
+        z = np.concatenate((x-self.xd, u-self.ud))
         data.r = np.array(self.costWeights * (z**2))
         data.cost = .5 * np.asscalar(sum(np.asarray(data.r)))
 
-    def calcDiff(self, data, x, u=None):
-        if u is None:
-            u = self.unone
+    def calcDiff(model, data, x, u=None):     
         # Cost derivatives        
         nx = len(x)
-        data.Lx = np.asarray(x * self.costWeights[:nx])
-        data.Lu = np.asarray(u * self.costWeights[nx:]) 
-        np.fill_diagonal(data.Lxx, self.costWeights[:nx])
-        np.fill_diagonal(data.Luu, self.costWeights[nx:])
+        data.Lx = np.asarray((x-model.xd) * model.costWeights[:nx])
+        np.fill_diagonal(data.Lxx, model.costWeights[:nx])
+        if model.mode == 's':
+            data.Lu = np.asarray((u-model.ud) * model.costWeights[nx:])         
+            np.fill_diagonal(data.Luu, model.costWeights[nx:])
         
 
-        # Dynamic derivatives
-        w = u[:2] # GRF
-        p = u[2:] # Foothold location
-        data.Fx = np.vstack((np.hstack(np.zeros(3,3),np.identity(3)),
-                             np.zeros(2,6),
-                             np.array([-w[1],w[0],0,0,0,0])))
-        data.Fu = np.vstack((np.zeros(3,4),
-                             np.identity(2),
-                             -(p[1]-x[1]),
-                             p[0]-x[0]))
+        # Dynamic derivatives 
+        if model.mode=='f':
+            u = np.zeros(2)      
+        # data.Fx = np.vstack((np.hstack((np.zeros((3,3)),np.identity(3))),
+        #                      np.zeros((2,6)),
+        #                      np.array([-u[1],u[0],0,0,0,0])))
+        data.Fx = np.vstack((np.zeros((2,6)),
+                             np.array([-u[1],u[0],0,0,0,0])))
+        if model.mode=='s':                                         
+            data.Fu = np.vstack((np.identity(2),
+                                 np.array([(model.p[1]-x[1]), -model.p[0]-x[0]])))
+        
