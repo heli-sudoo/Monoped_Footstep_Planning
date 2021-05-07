@@ -100,7 +100,8 @@ for x in xinit:
 for i in range(Horizon-1):
     us.append(uinit[i])
 ddp.setCallbacks([crocoddyl.CallbackVerbose()])
-ddp.solve(xs,us,100)
+ddp.solve()
+# ddp.solve(xs,us,100)
 
 # Plot smt solution
 smtSol.plot_solution(Traj, save=True)
