@@ -5,123 +5,117 @@ import crocoddyl
 import Monoped
 import smt_monoped
 import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+import util_monoped
 
+def create_differential_models(C, Xref):
+    # This function creates running action model and terminal model for one phase
+    assert len(C) == len(Xref), "length of contact not equal to length of reference"
+    N = len(C)
+    runningDAMs = [Monoped.DifferentialActionModelMonoped(C[i,:]) for i in range(N-1)]
+    for i in range(N-1):
+        runningDAMs[i].set_ref(Xref[i,:])
+    terminalDAM = Monoped.DifferentialActionModelMonoped(C[-1,:])
+    terminalDAM.set_ref(Xref[-1,:])    
+    return runningDAMs, terminalDAM
 
-def plot_trajectory(traj, var):
-    time = np.arange(len(traj.xs)) * 0.1
-    if var=='control':
-        fig, axl = plt.subplots()
-        axl.plot(time, traj.fxs, color='orange', label='fx')
-        axl.plot(time, traj.fys, color='orange', label='fy',linestyle='dashed')
-        axl.set_xlabel('Time (s)')
-        axl.set_ylabel('GRF (N)', color='orange')
-        axl.tick_params(axis='y', labelcolor='orange')        
+def create_model_seqs(rDAMseqs, tDAMseqs, dt):
+    rIAMseqs = []
+    tIAMseqs = []
+    n_seqs = len(rDAMseqs)
+    for s in range(n_seqs):
+        rIAMseqs.append([crocoddyl.IntegratedActionModelEuler(DAM, dt) for DAM in rDAMseqs[s]])
+        tIAMseqs.append(crocoddyl.IntegratedActionModelEuler(tDAMseqs[s], 0))
+    runningModels = []
+    terminalModel= []
+    for s in range(n_seqs-1):
+        runningModels+=rIAMseqs[s]+[tIAMseqs[s]]
+    runningModels+=rIAMseqs[-1]
+    terminalModel = tIAMseqs[-1]
+    return runningModels, terminalModel
 
-        axr = axl.twinx() # instantiate a second axes that shares the same x-axis
-        axr.plot(time, traj.cxs, color='green',label='px')
-        axr.plot(time, traj.cys, color='green',label='py',linestyle='dashed')
-        axr.set_ylabel('Foot Position (m)',color='green')
-        axr.tick_params(axis='y', labelcolor='green')
+def stack_vector_over_phase(Xmulti):
+    Xbig = Xmulti[0]
+    for i in range(1, len(Xmulti)):
+        Xbig = np.vstack((Xbig, Xmulti[i]))
+    return Xbig
 
-        fname = 'contactinfo.png'
-        fig.legend()
-        fig.tight_layout()
-        plt.show()
-        fig.savefig(fname)
-    if var=='state':
-        fig, axes = plt.subplots(1,2)
-        axes[0].plot(time, traj.xs, color='orange')
-        axes[0].set_xlabel('Time (s)')
-        axes[0].set_ylabel('x (m)', color='orange')
-        axes[0].tick_params(axis='y', labelcolor='orange')
-        axr = axes[0].twinx()
-        axr.plot(time, traj.ys, color='green')
-        axr.set_ylabel('y (m)', color='green')
-        axr.tick_params(axis= 'y', labelcolor='green')
-        axr.set_ylim()
-
-        axes[1].plot(time, traj.Rs, color='blue')
-        axes[1].set_xlabel('time (s)')
-        axes[1].set_ylabel('theta (rad)')
-
-        fname = 'state.png'
-        fig.tight_layout()
-        plt.show()
-        fig.savefig(fname)
-
-        
 # Solve footstep planning with SMT solver          
 smtSol, Traj = smt_monoped.Footstepplan_smt()
 Horizon = len(Traj)
 print('Number of steps of smt generated trjaectory %s' % (Horizon))
-# Get initial guess from smt solver
-xinit = [np.array([Traj.xs[i], Traj.ys[i], Traj.Rs[i], Traj.xds[i], Traj.yds[i], 0]) for i in range(Horizon)]
-xref = [np.array([Traj.xs[i], 1, 0, Traj.xds[i], 0, 0]) for i in range(Horizon)]
-uinit = [np.array([Traj.fxs[i], Traj.fys[i]]) for i in range(Horizon)]
-ctact = [np.array([Traj.cxs[i], Traj.cys[i]]) for i in range(Horizon)]
 
+# interpolate SMT trajectory
+x0 = np.array([0,1,0,0,0,0]) # Initial condition
+dt_coarse = 0.1
+dt_fine = 0.01
+refine = util_monoped.SMT_Trajectory_Refiner(Traj, dt_coarse, dt_fine)
+xinit_fine, xref_fine, uinit_fine, ctact_fine = refine.create_fine_sequence()
+n_phase = len(xinit_fine)
+print("number of phase %s" % (n_phase))
 
-# Create differential monoped model
-monopedDAMseq = [Monoped.DifferentialActionModelMonoped(ctact[i]) for i in range(Horizon-1)]
-for i in range(Horizon-1):
-    monopedDAMseq[i].set_ref(xref[i])
+# create shooting problem
+runningDAMSeqs = []
+terminalDAMSeqs = []
+for i in range(n_phase):
+    rDAMseq, tDAMseq, = create_differential_models(ctact_fine[i], xref_fine[i])    
+    runningDAMSeqs.append(rDAMseq)
+    terminalDAMSeqs.append(tDAMseq)
+      
+# modify cost
+for i in range(n_phase):
+    for rmodel in runningDAMSeqs[i]:
+        rmodel.costWeights = [0,20,10,30,.1,.01]
+        if rmodel.mode=='s':
+            rmodel.costWeights+=[.1, .1]            
+    terminalDAMSeqs[i].costWeights = [0,80,30,40,1,.1]
+    if terminalDAMSeqs[i].mode=='s':
+        terminalDAMSeqs[i].costWeights+=[0,0]
+terminalDAMSeqs[-1].costWeights= [0,100,500,100,1,.1]
 
-# Create monoped action data 
-monopedDataseq = [monopedDAM.createData() for monopedDAM in monopedDAMseq]
-
-dt = 0.1
-# Create discrete-time monoped model using simpletic Euler integration
-monopedIAMseq = [crocoddyl.IntegratedActionModelEuler(monopedDAM, dt) for monopedDAM in monopedDAMseq]
-
-# # Numerical difference for sanity check
-# monopedNDseq = [crocoddyl.DifferentialActionModelNumDiff(monopedDAM) for monopedDAM in monopedDAMseq]
-# monopedIAMseq = [crocoddyl.IntegratedActionModelEuler(monopedND, dt) for monopedND in monopedNDseq]
-
-# Initial condition
-x0 = np.array([0,1,0,0,0,0])
-
-# Create terminal action model
-tmonopedDAM = Monoped.DifferentialActionModelMonoped(ctact[-1])
-tmonopedIAM = crocoddyl.IntegratedActionModelEuler(tmonopedDAM, 0.)
-tmonopedDAM.set_ref(xref[-1])
-
-tmonopedDAM.costWeights = [.1,10,1,1,.1,.1]
-if tmonopedDAM.mode=='s':
-    tmonopedDAM.costWeights += [1, 1]                   
-
-# Create shooting problem
-problem = crocoddyl.ShootingProblem(x0, monopedIAMseq, tmonopedIAM)
+# create model sequences for shooting problem
+runningmodels, terminalmodel = create_model_seqs(runningDAMSeqs, terminalDAMSeqs, dt_fine)
+problem = crocoddyl.ShootingProblem(x0, runningmodels, terminalmodel)
 ddp = crocoddyl.SolverFDDP(problem)
 
+# formulate initial guess
+X_fine = stack_vector_over_phase(xinit_fine)
+U_fine = stack_vector_over_phase(uinit_fine)
+C_fine = stack_vector_over_phase(ctact_fine)
+N_fine = len(X_fine)
 xs = crocoddyl.StdVec_VectorX()
 us = crocoddyl.StdVec_VectorX()
-for x in xinit:
+for x in X_fine:
     xs.append(x)
-for i in range(Horizon-1):
-    us.append(uinit[i])
+for u in U_fine[:-1,:]:
+    us.append(u)
+
+# solve DDP
 ddp.setCallbacks([crocoddyl.CallbackVerbose()])
-ddp.solve()
-# ddp.solve(xs,us,100)
+ddp.solve(xs,us,20)
 
-# Plot smt solution
-smtSol.plot_solution(Traj, save=True)
-plot_trajectory(Traj, 'control')
-plot_trajectory(Traj, 'state')
 
+# Plot trajectory and generate animation
+xs_ddp, ys_ddp, xds_ddp, yds_ddp = [],[],[],[]
+fxs_ddp, fys_ddp,cxs_ddp, cys_ddp =[],[],[],[]
+Rs_ddp, ws_ddp=[],[]
+for i in range(N_fine-1):
+    xs_ddp.append(ddp.xs[i][0])
+    ys_ddp.append(ddp.xs[i][1])
+    xds_ddp.append(ddp.xs[i][3])
+    yds_ddp.append(ddp.xs[i][4])
+    fxs_ddp.append(ddp.us[i][0])
+    fys_ddp.append(ddp.us[i][1])
+    cxs_ddp.append(C_fine[i][0])
+    cys_ddp.append(C_fine[i][1])
+    Rs_ddp.append(ddp.xs[i][2])
+    ws_ddp.append(ddp.xs[i][5])
+
+Traj_ddp = smt_monoped.MonopedTrajectory(xs_ddp,ys_ddp,xds_ddp,yds_ddp,fxs_ddp,fys_ddp,cxs_ddp,cys_ddp,Rs_ddp,ws_ddp)
 # Plot ddp solution
-for i in range(Horizon-1):
-    Traj.xs[i] = ddp.xs[i][0]
-    Traj.ys[i] = ddp.xs[i][1]
-    Traj.Rs[i] = ddp.xs[i][2]        
-    Traj.fxs[i] = ddp.us[i][0]
-    Traj.fys[i] = ddp.us[i][1]
-Traj.xs[-1] = ddp.xs[-1][0]   
-Traj.ys[-1] = ddp.xs[-1][1]
-Traj.Rs[-1] = ddp.xs[-1][2] 
-
-plot_trajectory(Traj, 'control')
-plot_trajectory(Traj, 'state')
-smtSol.plot_solution(Traj, filename="ddp_monoped.gif", save=True)
+util_monoped.plot_SMT_trajectory(Traj_ddp, 'control')
+util_monoped.plot_SMT_trajectory(Traj_ddp, 'state')
+smtSol.plot_solution(Traj_ddp, filename="ddp_monoped.gif", save=True)
 
 
 

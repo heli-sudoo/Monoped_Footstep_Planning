@@ -421,7 +421,7 @@ class MonopedSMTSolver():
             # No solution.
             return None, solver_time
 
-    def plot_solution(self, soln, filename="smt_monoped.gif", save=False):
+    def plot_solution(self, soln, DT=0.1, filename="smt_monoped.gif", save=False):
         """
         Make a matplotlib animation of the given solution.
 
@@ -474,7 +474,7 @@ class MonopedSMTSolver():
                                    soln.cxs[i],
                                    soln.cys[i],
                                    soln.Rs[i],
-                                   i*self.dt]) for i in range(soln.N))
+                                   i*0.01]) for i in range(0,soln.N,5))
             return gen_list
 
         def init():
@@ -514,7 +514,7 @@ class MonopedSMTSolver():
             # show current time in the title
             ax.set_title("t=%0.2f" % t)
 
-        ani = animation.FuncAnimation(fig, run, data_gen, init_func=init, interval=4000*self.dt)
+        ani = animation.FuncAnimation(fig, run, data_gen, init_func=init, interval=4000*DT)
 
         if save:
             ani.save(filename)

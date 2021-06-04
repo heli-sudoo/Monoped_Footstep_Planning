@@ -1,12 +1,13 @@
 
 import numpy as np
 from numpy import arctan2, cos, sin
+from numpy.core.numeric import Inf
 
 import crocoddyl
 
 
 class DifferentialActionModelMonoped(crocoddyl.DifferentialActionModelAbstract):
-    def __init__(self, p, m=1, dt=0.1, I=1):
+    def __init__(self, p, m=1, I=1):
         """ Action model for the Monoped (without legs).
         The transition model of an unicycle system is described as    
         params @ mode   : 'f' -> flight mode 's' -> stance mode  
@@ -37,12 +38,14 @@ class DifferentialActionModelMonoped(crocoddyl.DifferentialActionModelAbstract):
         crocoddyl.DifferentialActionModelAbstract.__init__(self, crocoddyl.StateVector(6), nu, nr) #nu = 2 or 0, $nr = 8 or 6
 
         self.m = m
-        self.dt = dt
         self.g = 9.81
         self.I = I
-        self.costWeights = [1,10,1,.01,.2,.1]
+        self.wgrf = 5 # weight parameters of normal GRF penalty
+        self.costWeights = [1,2,20,.01,.02,.01]
         if self.mode == 's':
             self.costWeights += [.1, .1]
+
+        
         self.unone = np.zeros(self.nu)      
         self.nx = 6
         self.p = np.asarray(p)
@@ -70,6 +73,9 @@ class DifferentialActionModelMonoped(crocoddyl.DifferentialActionModelAbstract):
         z = np.concatenate((x-self.xd, u-self.ud))
         data.r = np.array(self.costWeights * (z**2))
         data.cost = .5 * np.asscalar(sum(np.asarray(data.r)))
+        # Penalize normal ground reaction force in stance phase
+        if self.mode=='s':
+            data.cost += np.exp(-self.wgrf*u[-1])
 
     def calcDiff(model, data, x, u=None):     
         # Cost derivatives        
@@ -80,7 +86,6 @@ class DifferentialActionModelMonoped(crocoddyl.DifferentialActionModelAbstract):
             data.Lu = np.asarray((u-model.ud) * model.costWeights[nx:])         
             np.fill_diagonal(data.Luu, model.costWeights[nx:])
         
-
         # Dynamic derivatives 
         if model.mode=='f':
             u = np.zeros(2)      
@@ -92,4 +97,6 @@ class DifferentialActionModelMonoped(crocoddyl.DifferentialActionModelAbstract):
         if model.mode=='s':                                         
             data.Fu = np.vstack((np.identity(2),
                                  np.array([(model.p[1]-x[1]), -model.p[0]-x[0]])))
-        
+            data.Lu+=np.array([0, -model.wgrf*np.exp(-model.wgrf*u[-1])])
+            data.Luu += np.array([[0,0], 
+                                  [0, model.wgrf**2*np.exp(-model.wgrf*u[-1])]])
