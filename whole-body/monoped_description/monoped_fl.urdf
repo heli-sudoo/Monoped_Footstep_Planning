@@ -1,0 +1,125 @@
+<?xml version="1.0"?>
+<robot name="monoped" xmlns:xacro="http://ros.org/wiki/xacro">
+
+    <!--!!!!!!!!!!!!!!!!!!Fixed Base!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-->
+    <link name = "base">
+    </link>
+    <!--!!!!!!!!!!!!!!!!!!Body!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-->
+
+    <!--virtual Body in x!-->
+    <link name = "vbodyx">
+    </link>
+    <!--virtual Body in y!-->
+    <link name = "vbodyy">
+    </link>
+    <!--real Body rotation!-->
+    <link name = "body">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="3.8"/>
+            <inertia ixx="0"  ixy="0"  ixz="0" iyy=".1" iyz="0" izz="0" />
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.08 0.08 0.08" />
+            </geometry>
+            <material name="Cyan">
+                <color rgba="0 1.0 1.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <!--!!!!!!!!!!!!!!!!!!Upper Link!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-->
+    <link name = "upper_link">
+        <inertial>
+            <origin xyz="0.016 0 0" rpy="0 0 0"/>
+            <mass value="1.782"/>
+            <inertia ixx="0"  ixy="0"  ixz="0" iyy="0.05" iyz="0" izz="0" />
+        </inertial>
+        <visual>
+            <origin xyz="0.1 0 0" rpy="0 -1.57 0" />
+            <geometry>
+                <cylinder radius="0.01" length="0.2" />
+            </geometry>
+            <material name="blue">
+                <color rgba="0 0 1.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <!--!!!!!!!!!!!!!!!!!!Lower Link!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-->
+    <link name = "lower_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0.548"/>
+            <inertia ixx="0"  ixy="0"  ixz="0" iyy="0.002" iyz="0" izz="0" />
+        </inertial>
+        <visual>
+            <origin xyz="0.1 0 0" rpy="0 -1.57 0" />
+            <geometry>
+                <cylinder radius="0.01" length="0.2" />
+            </geometry>
+            <material name="green">
+                <color rgba="0 1.0 0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <!--Foot-->
+    <link name="foot">
+         <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <sphere radius="0.01"/>
+            </geometry>
+            <material name="red">
+                <color rgba="1 0 0 1.0"/>
+            </material>
+        </visual>
+    </link>
+
+    <!--!!!!!!!!!!!!!!!!!!Floating Joint!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-->
+    <joint name = "transx" type="prismatic">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="base"/>
+        <child link="vbodyx"/>
+        <axis xyz="1 0 0"/>        
+        <limit effort="100" lower="-10000" upper="10000" velocity="100"/>         
+    </joint>
+    <joint name = "transz" type="prismatic">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="vbodyx"/>
+        <child link="vbodyy"/>
+        <axis xyz="0 0 1"/>        
+        <limit effort="30" lower="-10000" upper="10000" velocity="100"/>         
+    </joint>
+    <joint name = "pitch" type="revolute">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="vbodyy"/>
+        <child link="body"/>
+        <axis xyz="0 1 0"/>        
+        <limit effort="30" lower="-6.28" upper="6.28" velocity="100"/>         
+    </joint>
+
+    <!--!!!!!!!!!!!!!!!!!!Hip and Knee!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-->
+    <joint name = "hip" type="revolute">
+        <origin xyz="0 0 0" rpy="0 1.57 0"/>
+        <parent link="body"/>
+        <child link="upper_link"/>
+        <axis xyz="0 1 0"/>   
+        <limit effort="30" lower="-3.14" upper="3.14" velocity="100"/>         
+    </joint>
+
+    <joint name = "knee" type="revolute">
+        <origin xyz="0.2 0 0" rpy="0 0 0"/>
+        <parent link="upper_link"/>
+        <child link="lower_link"/>
+        <axis xyz="0 1 0"/>   
+        <limit effort="30" lower="-3.14" upper="3.14" velocity="100"/>                  
+    </joint>
+
+    <joint name = "fixed_foot" type="fixed">
+        <origin xyz="0.2 0 0" rpy = "0 0 0"/>
+        <parent link="lower_link"/>
+        <child link="foot"/>
+    </joint>
+
+</robot>    
